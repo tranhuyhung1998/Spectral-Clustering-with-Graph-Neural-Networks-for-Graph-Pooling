@@ -19,6 +19,7 @@ from spektral.layers.ops import sp_matrix_to_sp_tensor_value
 from spektral.utils import batch_iterator, log, init_logging
 from spektral.utils.convolution import normalized_adjacency
 
+from utils.custom_cuts import TraceMinCutPool
 from utils.dataset_loader import get_graph_kernel_dataset
 
 
@@ -62,7 +63,7 @@ np.random.seed(seed)
 
 # Parameters
 P = OrderedDict(
-    runs=10,             # Runs to repeat per config
+    runs=2,             # Runs to repeat per config
     data_mode='bench',   # bench / synth
     GNN_type='GCS',      # Type of GNN {GCN, GCS, Cheb, ARMA}
     n_channels=32,       # Channels per layer
@@ -79,8 +80,8 @@ log(P)
 
 # Tunables
 tunables = OrderedDict(
-    dataset_ID=['hard', 'PROTEINS', 'Mutagenicity', 'easy'],
-    method=['diff_full']
+    dataset_ID=['Mutagenicity'],
+    method=['flat']
     # 'flat', 'dense', 'diff_pool', 'top_k_pool', 'mincut_pool', 'sag_pool'
 )
 log(tunables)
@@ -93,7 +94,7 @@ for T in product_dict(**tunables):
 
     # Custom parameters based on method
     SW_KEY = 'dense_{}_sample_weights:0'.format(4 if P['method'] == 'dense' else 1)
-    if P['method'] == 'diff_pool' or P['method'] == 'mincut_pool' or P['method'] == 'diff_full':
+    if P['method'] in ['diff_pool', 'mincut_pool', 'diff_full', 'mincut_noorthogonal']:
         P['batch_size'] = 1
     else:
         P['batch_size'] = 8
@@ -183,6 +184,11 @@ for T in product_dict(**tunables):
                                                 h=P['mincut_H'],
                                                 activation=P['activ'],
                                                 kernel_regularizer=l2(P['pool_l2']))([gc1, A_in, I_in])
+            elif P['method'] == 'mincut_noorthogonal':
+                X_1, A_1, I_1, M_1 = TraceMinCutPool(k=int(average_N // 2),
+                                                h=P['mincut_H'],
+                                                activation=P['activ'],
+                                                kernel_regularizer=l2(P['pool_l2']))([gc1, A_in, I_in])
 
             elif P['method'] == 'flat':
                 X_1 = gc1
@@ -217,6 +223,11 @@ for T in product_dict(**tunables):
                 X_2, A_2, I_2 = SAGPool(0.5)([gc2, A_1, I_1])
             elif P['method'] == 'mincut_pool':
                 X_2, A_2, I_2, M_2 = MinCutPool(k=int(average_N // 4),
+                                                h=P['mincut_H'],
+                                                activation=P['activ'],
+                                                kernel_regularizer=l2(P['pool_l2']))([gc2, A_1, I_1])
+            elif P['method'] == 'mincut_noorthogonal':
+                X_2, A_2, I_2, M_2 = TraceMinCutPool(k=int(average_N // 4),
                                                 h=P['mincut_H'],
                                                 activation=P['activ'],
                                                 kernel_regularizer=l2(P['pool_l2']))([gc2, A_1, I_1])

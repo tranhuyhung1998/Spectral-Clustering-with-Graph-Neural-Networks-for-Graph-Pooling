@@ -1,0 +1,5 @@
+Dataset,Dense,No-pool,DiffPool,Top-K,SAGpool,MinCutPool
+easy,0.32,0.99,0.98,0.77,0.92,0.98,0.99
+hard,0.31,0.72,0.71,0.31,0.39,0.66,0.29
+Mutagenicity,0.70,0.82,0.80,0.74,0.77,0.81,0.80
+PROTEINS,0.68,0.72,0.79,0.69,0.69,0.76,0.77
