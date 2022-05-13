@@ -1,4 +1,5 @@
 import itertools
+import os.path
 import time
 from collections import OrderedDict
 
@@ -78,8 +79,9 @@ log(P)
 
 # Tunables
 tunables = OrderedDict(
-    dataset_ID=['PROTEINS'],
-    method=['mincut_pool']  # 'flat', 'dense', 'diff_pool', 'top_k_pool', 'mincut_pool', 'sag_pool'
+    dataset_ID=['hard', 'PROTEINS', 'Mutagenicity', 'easy'],
+    method=['diff_full']
+    # 'flat', 'dense', 'diff_pool', 'top_k_pool', 'mincut_pool', 'sag_pool'
 )
 log(tunables)
 
@@ -91,7 +93,7 @@ for T in product_dict(**tunables):
 
     # Custom parameters based on method
     SW_KEY = 'dense_{}_sample_weights:0'.format(4 if P['method'] == 'dense' else 1)
-    if P['method'] == 'diff_pool' or P['method'] == 'mincut_pool':
+    if P['method'] == 'diff_pool' or P['method'] == 'mincut_pool' or P['method'] == 'diff_full':
         P['batch_size'] = 1
     else:
         P['batch_size'] = 8
@@ -101,7 +103,7 @@ for T in product_dict(**tunables):
         ########################################################################
         # LOAD DATA
         ########################################################################
-        if P['data_mode'] == 'bench':
+        if P['dataset_ID'] not in ['easy', 'hard']:
             A, X, y = get_graph_kernel_dataset(P['dataset_ID'], feat_norm='ohe')
             # Train/test split
             A_train, A_test, \
@@ -110,8 +112,8 @@ for T in product_dict(**tunables):
             A_train, A_val, \
             X_train, X_val, \
             y_train, y_val = train_test_split(A_train, X_train, y_train, test_size=0.1, stratify=y_train)
-        elif P['data_mode'] == 'synth':
-            loaded = np.load('data/hard.npz', allow_pickle=True)
+        elif P['data_mode'] == 'bench':
+            loaded = np.load('data/' + T['dataset_ID'] + '.npz', allow_pickle=True)
             X_train, A_train, y_train = loaded['tr_feat'], list(loaded['tr_adj']), loaded['tr_class']
             X_test, A_test, y_test = loaded['te_feat'], list(loaded['te_adj']), loaded['te_class']
             X_val, A_val, y_val = loaded['val_feat'], list(loaded['val_adj']), loaded['val_class']
@@ -167,8 +169,13 @@ for T in product_dict(**tunables):
                       activation=P['activ'],
                       kernel_regularizer=l2(P['GNN_l2']))([X_in, A_in])
 
-            if P['method'] == 'top_k_pool':
-                X_1, A_1, I_1, M_1 = TopKPool(0.5)([gc1, A_in, I_in])
+            if P['method'] == 'diff_full':
+                X_1, A_1, I_1, M_1 = DiffPool(k=int(average_N // 2),
+                                              channels=P['n_channels'],
+                                              activation=P['activ'],
+                                              kernel_regularizer=l2(P['GNN_l2']))([gc1, A_in, I_in])
+            elif P['method'] == 'top_k_pool':
+                X_1, A_1, I_1 = TopKPool(0.5)([gc1, A_in, I_in])
             elif P['method'] == 'sag_pool':
                 X_1, A_1, I_1 = SAGPool(0.5)([gc1, A_in, I_in])
             elif P['method'] == 'mincut_pool':
@@ -199,8 +206,13 @@ for T in product_dict(**tunables):
                       activation=P['activ'],
                       kernel_regularizer=l2(P['GNN_l2']))([X_1, A_1])
 
-            if P['method'] == 'top_k_pool':
-                X_2, A_2, I_2, M_2 = TopKPool(0.5)([gc2, A_1, I_1])
+            if P['method'] == 'diff_full':
+                X_2, A_2, I_2, M_2 = DiffPool(k=int(average_N // 2),
+                                              channels=P['n_channels'],
+                                              activation=P['activ'],
+                                              kernel_regularizer=l2(P['GNN_l2']))([gc2, A_1, I_1])
+            elif P['method'] == 'top_k_pool':
+                X_2, A_2, I_2 = TopKPool(0.5)([gc2, A_1, I_1])
             elif P['method'] == 'sag_pool':
                 X_2, A_2, I_2 = SAGPool(0.5)([gc2, A_1, I_1])
             elif P['method'] == 'mincut_pool':
@@ -289,7 +301,7 @@ for T in product_dict(**tunables):
                     best_val_loss = val_loss
                     patience = P['es_patience']
                     log('New best val_loss {:.3f}'.format(val_loss))
-                    model.save_weights(log_dir + 'best_model.h5')
+                    model.save_weights(log_dir + P['dataset_ID'] + '_' + P['method'] + '.h5')
                 else:
                     patience -= 1
                     if patience == 0:
@@ -304,7 +316,7 @@ for T in product_dict(**tunables):
         # EVALUATE MODEL
         ########################################################################
         # Load best model
-        model.load_weights(log_dir + 'best_model.h5')
+        model.load_weights(log_dir + P['dataset_ID'] + '_' + P['method'] + '.h5')
 
         # Test model
         log('Testing model')
@@ -328,3 +340,9 @@ for T in product_dict(**tunables):
     else:
         df_out = pd.concat([df_out, pd.DataFrame([P])])
     df_out.to_csv(log_dir + 'results.csv')
+
+    out_dir = './output'
+    os.makedirs(os.path.join(out_dir, P['dataset_ID']), exist_ok=True)
+    with open(os.path.join(out_dir, P['dataset_ID'], P['method'] + '.txt'), 'w') as f_out:
+        f_out.write(' '.join('%.2f' % res for res in
+                             [P['test_loss_mean'], P['test_loss_std'], P['test_acc_mean'], P['test_acc_std']]))
